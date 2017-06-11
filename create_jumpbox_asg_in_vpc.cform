@@ -1,0 +1,335 @@
+{
+    "AWSTemplateFormatVersion": "2010-09-09",
+    "Description": "Creates a JumpBox VPC with JumpBox availability provided by Autoscaling Group and Elastic IP",
+    "Parameters" : {
+        "AllowedCIDRRange" : {
+            "Description" : "CIDR range for clients to access the VPC via SSH or RDP",
+            "Type" : "String",
+            "MinLength" : "10",
+            "MaxLength" : "18",
+            "AllowedPattern" : "[0-9]?[0-9]?[0-9]\\.[0-9]?[0-9]?[0-9]\\.[0-9]?[0-9]?[0-9]\\.[0-9]?[0-9]?[0-9]/[1-3][0-9]",
+            "ConstraintDescription" : "Must be a valid CIDR"
+        },
+        "CidrAddress" : {
+            "Default" : "10.0",
+            "Description" : "Initial two values for CIDR address for the VPC, which will be expanded X.Y.0.0/16",
+            "Type" : "String",
+            "MinLength" : "3",
+            "MaxLength" : "7",
+            "AllowedPattern" : "[0-9]?[0-9]?[0-9]\\.[0-9]?[0-9]?[0-9]",
+            "ConstraintDescription" : "Must create a valid CIDR"
+        },
+        "InstanceAmiId" : {
+            "Description" : "The AMI to be used for the JumpBox",
+            "Type" : "String"
+        },
+        "InstanceType" : {
+            "Description" : "The Instance Type to be used for the JumpBox",
+            "Default" : "t2.micro",
+            "Type" : "String"
+        },
+        "KeyName" : {
+            "Description" : "The KeyName to access the JumpBox",
+            "Type" : "String"
+        },
+        "VPCTemplateURL" : {
+            "Description" : "The URL to the template to create the VPC (see https://github.com/gford1000-aws/vpc/blob/master/create_vpc.cform)",
+            "Type" : "String"
+        } 
+	},
+	"Resources" : {
+        "VPC" : {
+            "Type" : "AWS::CloudFormation::Stack",
+            "Properties" : {
+                "Parameters" : {
+                    "CidrAddress" : { "Ref" : "CidrAddress" },
+                    "CreatePublicSubnet" : "true",
+                    "EnableDnsSupport" : "true",
+                    "PrivateSubnetCount" : "0"
+                },
+                "TemplateURL" : { "Ref" : "VPCTemplateURL" }
+            }
+        },
+        "VPCNACL" : {
+            "Type" : "AWS::EC2::NetworkAcl",
+            "Properties" : {
+                "VpcId" : { "Fn::GetAtt" : [ "VPC", "Outputs.VPC" ] }
+            }
+        },
+        "NACLIngress22" : {
+            "Type" : "AWS::EC2::NetworkAclEntry",
+            "Properties" : {
+                "Egress" : "false",
+                "NetworkAclId" : { "Ref" : "VPCNACL" },
+                "RuleNumber" : "100",
+                "RuleAction" : "allow",
+                "Protocol" : "6",
+                "PortRange" : { "From" : "22", "To" : "22" },
+                "CidrBlock" : { "Ref" : "AllowedCIDRRange"}
+            }
+        },
+        "NACLIngress3389" : {
+            "Type" : "AWS::EC2::NetworkAclEntry",
+            "Properties" : {
+                "Egress" : "false",
+                "NetworkAclId" : { "Ref" : "VPCNACL" },
+                "RuleNumber" : "200",
+                "RuleAction" : "allow",
+                "Protocol" : "6",
+                "PortRange" : { "From" : "3389", "To" : "3389" },
+                "CidrBlock" : { "Ref" : "AllowedCIDRRange"}
+            }
+        },
+        "NACLEgress" : {
+            "Type" : "AWS::EC2::NetworkAclEntry",
+            "Properties" : {
+                "Egress" : "true",
+                "NetworkAclId" : { "Ref" : "VPCNACL" },
+                "RuleNumber" : "100",
+                "RuleAction" : "allow",
+                "Protocol" : "6",
+                "PortRange" : { "From" : "49152", "To" : "65535" },
+                "CidrBlock" : { "Ref" : "AllowedCIDRRange"}
+            }
+        },
+        "PublicSubnet1NaclAssociation" : {
+            "Type" : "AWS::EC2::SubnetNetworkAclAssociation",
+            "Properties" : {
+                "NetworkAclId" : { "Ref" : "VPCNACL" },
+                "SubnetId" : { "Fn::Select" : [ "0", { "Fn::Split" : [ ",", { "Fn::GetAtt" : [ "VPC", "Outputs.PublicSubnets" ] } ] } ] }
+            }
+        },
+        "PublicSubnet2NaclAssociation" : {
+            "Type" : "AWS::EC2::SubnetNetworkAclAssociation",
+            "Properties" : {
+                "NetworkAclId" : { "Ref" : "VPCNACL" },
+                "SubnetId" : { "Fn::Select" : [ "1", { "Fn::Split" : [ ",", { "Fn::GetAtt" : [ "VPC", "Outputs.PublicSubnets" ] } ] } ] }
+            }
+        },
+        "PublicSubnet3NaclAssociation" : {
+            "Type" : "AWS::EC2::SubnetNetworkAclAssociation",
+            "Properties" : {
+                "NetworkAclId" : { "Ref" : "VPCNACL" },
+                "SubnetId" : { "Fn::Select" : [ "2", { "Fn::Split" : [ ",", { "Fn::GetAtt" : [ "VPC", "Outputs.PublicSubnets" ] } ] } ] }
+            }
+        },
+        "SecurityGroup" : {
+            "Type" : "AWS::EC2::SecurityGroup",
+            "Properties" : {
+                "GroupDescription" : "JumpBox Security Group",
+                "VpcId" : { "Fn::GetAtt" : [ "VPC", "Outputs.VPC" ] },
+                "SecurityGroupIngress" : [
+                    {
+                        "IpProtocol" : "tcp", 
+                        "FromPort" : "22", 
+                        "ToPort" : "22", 
+                        "CidrIp" : { "Ref" : "AllowedCIDRRange" }
+                    },
+                    {
+                        "IpProtocol" : "tcp", 
+                        "FromPort" : "3389", 
+                        "ToPort" : "3389", 
+                        "CidrIp" : { "Ref" : "AllowedCIDRRange" }
+                    }
+                ]
+            }
+        },
+        "JumpBoxRole" : {
+            "Type": "AWS::IAM::Role",
+            "Properties": {
+                "AssumeRolePolicyDocument": {
+                    "Version": "2012-10-17",
+                    "Statement": [
+                        {
+                            "Effect": "Allow",
+                            "Principal": {
+                                "Service": "ec2.amazonaws.com"
+                            },
+                            "Action": "sts:AssumeRole"
+                        }
+                    ]
+                },
+                "Path": "/",
+                "Policies": [ ]
+            }
+        },
+        "InstanceProfile": {
+            "Type": "AWS::IAM::InstanceProfile",
+            "Properties": {
+                "Path": "/",
+                "Roles": [ { "Ref" : "JumpBoxRole" } ]
+            }
+        },
+        "LaunchConfig" : {
+            "Type": "AWS::AutoScaling::LaunchConfiguration",
+            "Properties" : {
+                "AssociatePublicIpAddress" : false,
+                "ImageId" : { "Ref" : "InstanceAmiId" },
+                "InstanceType" : { "Ref" : "InstanceType" },
+                "IamInstanceProfile" : { "Ref" : "InstanceProfile" },
+                "KeyName" : { "Ref" : "KeyName" },
+                "SecurityGroups" : [ 
+                    { "Ref" : "SecurityGroup" } 
+                ]
+            }
+        },
+        "AutoScalingGroup" : {
+            "Type" : "AWS::AutoScaling::AutoScalingGroup",
+            "DependsOn" : "JumpBoxLaunchTopic",
+            "Properties" : {
+                "DesiredCapacity" : "1",
+                "LaunchConfigurationName" : { "Ref" : "LaunchConfig" },
+                "MinSize" : "1",
+                "MaxSize" : "1",
+                "NotificationConfigurations" : [
+                    {
+                        "TopicARN" : {
+                            "Ref" : "JumpBoxLaunchTopic"
+                        },
+                        "NotificationTypes" : [ "autoscaling:EC2_INSTANCE_LAUNCH" ]
+                    }
+                ],
+                "VPCZoneIdentifier" : { "Fn::Split" : [ ",", { "Fn::GetAtt" : [ "VPC", "Outputs.PublicSubnets" ] } ] }
+            }
+        },
+        "JumpBoxLaunchTopic" : {
+            "Type" : "AWS::SNS::Topic",
+            "Properties" : {
+                "Subscription" : [
+                    { 
+                        "Endpoint" : { "Fn::GetAtt" : [ "LambdaEIPAssociation", "Arn" ] }, 
+                        "Protocol" : "lambda" 
+                    }
+                ]
+            }
+        },
+        "PermissionSNSToInvokeLambda": {
+            "Type": "AWS::Lambda::Permission",
+            "Properties": {
+                "FunctionName": { "Ref": "LambdaEIPAssociation" },
+                "Action": "lambda:InvokeFunction",
+                "Principal": "sns.amazonaws.com",
+                "SourceArn": { "Ref" : "JumpBoxLaunchTopic" }
+            }
+        },
+        "JumpBoxEIP" : {
+            "Type" : "AWS::EC2::EIP",
+            "Properties" : {
+                "Domain" : "vpc"
+            }
+        },        
+        "LambdaEIPAssociation" : {
+            "Type": "AWS::Lambda::Function",
+            "DependsOn" : "VPC",
+            "Properties" : {
+                "Code" : {
+                    "ZipFile" : {
+                        "Fn::Join": [
+                            "\n",
+                            [
+                                "import boto3",
+                                "from json import loads",
+                                "import os",
+                                "from uuid import uuid4",
+                                "",
+                                "EIP = os.environ['EIP']",
+                                "",
+                                "def lambda_handler(event, context):",
+                                "  try:",
+                                "    message = loads(event.get('Records', [{}])[0].get('Sns', {}).get('Message', \"{}\"))",
+                                "    instance_id = message.get('EC2InstanceId', '')",
+                                "    print(\"Associating {} to {}\".format(EIP, instance_id))",
+                                "    client = boto3.client('ec2')",
+                                "    client.associate_address(",
+                                "        AllocationId=EIP,",
+                                "        InstanceId=instance_id)",
+                                "  except Exception as e:",
+                                "    print(\"Unexpected exception: {}\".format(e))",
+                                ""
+                            ]
+                        ]
+                    }
+                },
+                "Description" : "Lambda associating Elastic IP to a launched JumpBox EC2 instance",
+                "Environment" : {
+                    "Variables" : {
+                        "EIP" : { "Fn::GetAtt": [ "JumpBoxEIP", "AllocationId" ] }
+                    }
+                },
+                "Handler" : "index.lambda_handler",
+                "MemorySize" : 128,
+                "Role" : { "Fn::GetAtt": [ "LambdaEIPAssociationRole", "Arn" ] },
+                "Runtime" : "python2.7",
+                "Timeout" : 5
+            }
+        },
+        "LambdaEIPAssociationRole": {
+          "Type": "AWS::IAM::Role",
+          "Properties": {
+            "AssumeRolePolicyDocument": {
+              "Version": "2012-10-17",
+              "Statement": [
+                {
+                  "Effect": "Allow",
+                  "Principal": {
+                    "Service": "lambda.amazonaws.com"
+                  },
+                  "Action": "sts:AssumeRole"
+                }
+              ]
+            },
+            "Path": "/",
+            "Policies": [
+              {
+                "PolicyName": "root",
+                "PolicyDocument": {
+                  "Version": "2012-10-17",
+                  "Statement": [
+                    {
+                      "Action": [
+                        "logs:CreateLogGroup",
+                        "logs:CreateLogStream",
+                        "logs:PutLogEvents"
+                      ],
+                      "Resource": "arn:aws:logs:*:*:*",
+                      "Effect": "Allow"
+                    },
+                    {
+                      "Effect":"Allow",
+                      "Action": "ec2:AssociateAddress",
+                      "Resource": "*"
+                    }
+                  ]
+                }
+              }
+            ]
+          }
+        }
+    },
+    "Outputs" : {
+        "EIP" : {
+            "Description" : "The Elastic IP of the JumpBox",
+            "Value" : { "Ref" : "JumpBoxEIP" }
+        }, 
+        "JumpBoxRole" : {
+            "Description" : "Role applied to the JumpBox",
+            "Value" : { "Ref" : "JumpBoxRole" }
+        },
+        "JumpBoxSecurityGroup" : {
+            "Description" : "Security Group applied to the JumpBox",
+            "Value" : { "Ref" : "SecurityGroup" }
+        },
+        "RouteTable" : {
+            "Description" : "Route table of the VPC",
+            "Value" : { "Fn::GetAtt" : [ "VPC", "Outputs.PublicSubnetRouteTable" ] }
+        },
+        "VPC" : {
+            "Description" : "VPC Name",
+            "Value" : { "Fn::GetAtt" : [ "VPC", "Outputs.VPC" ] }
+        },
+        "VPCNacl" : {
+            "Description" : "Network ACL for the VPC",
+            "Value" : { "Ref" : "VPCNACL" }
+        }
+    }
+}
