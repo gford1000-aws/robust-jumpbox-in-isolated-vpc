@@ -12,6 +12,12 @@ The script creates the following:
 
 Notes:
 
+1. Access to the VPC can be restricted to a specific CIDR block range
+2. The script creates a Network ACL that only allows access to the VPC using SSH or RDP, and allows no access from the VPC.  Therefore the JumpBox can be reached securely but once on the JumpBox, no egress is permitted, which minimises the potential for data loss or unwanted downloads.
+3. The JumpBox is launched via an AutoScalingGroup across the 3 public subnets, which ensures a single JumpBox instance is running.  The Launch Configuration does not create public IP addresses, so cannot be reached directly by a VPC IP.
+4. The script creates an Elastic IP, which is associated to the running JumpBox instance.
+5. The script creates a Lambda function that listens to Launch events from the Autoscaling Group (via an SNS topic), associating the Elastic IP to the newly started instance.
+6. Cloudwatch logs capture the association performed by the Lambda function.
 
 
 ## Arguments
