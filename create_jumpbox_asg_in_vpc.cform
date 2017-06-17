@@ -310,6 +310,17 @@
         }
     },
     "Outputs" : {
+        "CidrBlock": {
+            "Description" : "The CIDR of the VPC",
+            "Value" : {
+                "Fn::Join" : [ "",
+                    [
+                        { "Ref" : "CidrAddress" },
+                        ".0.0/16"
+                    ] 
+                ]
+            }
+        },
         "EIP" : {
             "Description" : "The Elastic IP of the JumpBox",
             "Value" : { "Ref" : "JumpBoxEIP" }
